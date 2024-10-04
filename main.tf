@@ -1,56 +1,92 @@
 ## AWS credentials
-provider "aws" {}
-
-## Define variables
-variable "cidr_blocks" {
-  description = "subnet cidr blocks and name tags for vpc and subnets"
-  type = list(object({
-    cidr_block = string
-    name = string
-  }))
+provider "aws" {
+  region = "ap-southeast-1"
 }
 
-# defined in environment variable with export TF_VAR_avail_zone="ap-southeast-1a"
-variable "avail_zone" {} 
-
 ## Create recources
-resource "aws_vpc" "development-vpc" {
-  cidr_block = var.cidr_blocks[0].cidr_block
+resource "aws_vpc" "myapp-vpc" {
+  cidr_block = var.vpc_cidr_block
   tags = {
-    Name: var.cidr_blocks[0].name
+    Name: "${var.env_prefix}-vpc"
   }
 }
 
-## Create recources
-resource "aws_subnet" "dev-aws_subnet-1" {
-  vpc_id = aws_vpc.development-vpc.id
-  cidr_block = var.cidr_blocks[1].cidr_block
+# Use module 
+module "myapp-subnet" {
+  source = "./modules/subnet"
+  subnet_cidr_block = var.subnet_cidr_block
+  avail_zone = var.avail_zone
+  env_prefix = var.env_prefix
+  vpc_id = aws_vpc.myapp-vpc.id
+  default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
+}
+
+resource "aws_default_security_group" "default-sg" {
+  vpc_id = aws_vpc.myapp-vpc.id
+
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    cidr_blocks = [var.my_ip]
+  }
+
+  ingress {
+    from_port = 8080
+    to_port = 8080
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    prefix_list_ids = []
+  }
+  tags = {
+    Name: "${var.env_prefix}-default-sg"
+  }
+}
+
+# query AMI
+data "aws_ami" "latest-amazon-linux-image" {
+  most_recent = true
+  owners = ["amazon"]
+  filter {
+    name = "name"
+    values = ["amzn2-ami-kernel-5.10-hvm-*-x86_64-gp2"]
+  }
+  filter {
+    name = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+# Create ssh key pair
+resource "aws_key_pair" "ssh-key" {
+  key_name = "server-key"
+  public_key = "${file(var.public_key_location)}"
+}
+
+# Create EC2 instance
+resource "aws_instance" "myapp-server" {
+  ami = data.aws_ami.latest-amazon-linux-image.id
+  instance_type = var.instance_type
+
+  # Use the output from module as input
+  subnet_id = module.myapp-subnet.subnet.id
+  vpc_security_group_ids = [aws_default_security_group.default-sg.id]
   availability_zone = var.avail_zone
+
+  associate_public_ip_address = true
+  key_name = aws_key_pair.ssh-key.key_name
+
+  user_data = "${file("entry-script.sh")}"
+
   tags = {
-    Name: var.cidr_blocks[1].name
+    Name: "${var.env_prefix}-server"
   }
 }
 
-## Query data from real infrastructure
-data "aws_vpc" "existing_vpc" {
-  default = true
-}
 
-## Create recources from queried data
-resource "aws_subnet" "dev-aws_subnet-2" {
-  vpc_id = data.aws_vpc.existing_vpc.id
-  cidr_block = "172.31.48.0/20"
-  availability_zone = "ap-southeast-1a"
-  tags = {
-    Name: "subnet-1-default"
-  }
-} 
-
-## Output 
-output "dev-vpc-id" {
-  value = aws_vpc.development-vpc.id
-}
-
-output "dev-subnet-id" {
-  value = aws_subnet.dev-aws_subnet-1.id
-}
