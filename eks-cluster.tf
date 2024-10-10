@@ -30,12 +30,12 @@ module "eks" {
   self_managed_node_groups = [
     {
         instance_type = "t2.micro"
-        name = "worker-group-1"
+        launch_template_name = "worker-group-1"
         desired_capacity = 2
     },
     {
         instance_type = "t2.micro"
-        name = "worker-group-2"
+        launch_template_name = "worker-group-2"
         desired_capacity = 1
     }
   ]
