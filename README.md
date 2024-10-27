@@ -35,4 +35,3 @@ Each branch can be checked out individually to explore the specific feature it d
 
    ```bash
    git clone https://github.com/Dakuchi/terraform-project.git
-   cd <repository-name>
